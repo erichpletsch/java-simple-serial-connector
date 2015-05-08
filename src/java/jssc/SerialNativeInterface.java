@@ -26,6 +26,7 @@ package jssc;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -75,16 +76,20 @@ public class SerialNativeInterface {
      * @since 2.6.0
      */
     public static final String PROPERTY_JSSC_PARMRK = "JSSC_PARMRK";
+    
+    private static String osName, architecture, userHome, fileSeparator, tmpFolder;    
 
     static {
-        String libFolderPath;
+    	// since 2.8.0 ->
+        String libFolderPath = JSSCProperties.libDirectory;
+        // <- since 2.8.0
         String libName;
 
-        String osName = System.getProperty("os.name");
-        String architecture = System.getProperty("os.arch");
-        String userHome = System.getProperty("user.home");
-        String fileSeparator = System.getProperty("file.separator");
-        String tmpFolder = System.getProperty("java.io.tmpdir");
+        osName = System.getProperty("os.name");
+        architecture = System.getProperty("os.arch");
+        userHome = System.getProperty("user.home");
+        fileSeparator = System.getProperty("file.separator");
+        tmpFolder = System.getProperty("java.io.tmpdir");
 
         //since 2.3.0 ->
         String libRootFolder = new File(userHome).canWrite() ? userHome : tmpFolder;
@@ -140,43 +145,100 @@ public class SerialNativeInterface {
             architecture = "arm" + floatStr;
         }
         
-        libFolderPath = libRootFolder + fileSeparator + ".jssc" + fileSeparator + osName;
-        libName = "jSSC-" + libVersion + "_" + architecture;
-        libName = System.mapLibraryName(libName);
+		// Setup the library name
+		libName = "jSSC-" + libVersion + "_" + architecture;
+		libName = System.mapLibraryName(libName);
 
-        if(libName.endsWith(".dylib")){//Since 2.1.0 MacOSX 10.8 fix
-            libName = libName.replace(".dylib", ".jnilib");
-        }
+		if (libName.endsWith(".dylib")) {// Since 2.1.0 MacOSX 10.8 fix
+			libName = libName.replace(".dylib", ".jnilib");
+		}
 
-        boolean loadLib = false;
+		// Set the default path for the lib if needed.
+		if (libFolderPath == null || libFolderPath == "") {
+			libFolderPath = libRootFolder + fileSeparator + ".jssc" + fileSeparator + osName;
+		}
 
-        if(isLibFolderExist(libFolderPath)){
-            if(isLibFileExist(libFolderPath + fileSeparator + libName)){
-                loadLib = true;
-            }
-            else {
-                if(extractLib((libFolderPath + fileSeparator + libName), osName, libName)){
-                    loadLib = true;
-                }
-            }
-        }
-        else {
-            if(new File(libFolderPath).mkdirs()){
-                if(extractLib((libFolderPath + fileSeparator + libName), osName, libName)){
-                    loadLib = true;
-                }
-            }
-        }
-
-        if (loadLib) {
-            System.load(libFolderPath + fileSeparator + libName);
-            String versionBase = getLibraryBaseVersion();
-            String versionNative = getNativeLibraryVersion();
-            if (!versionBase.equals(versionNative)) {
-                System.err.println("Warning! jSSC Java and Native versions mismatch (Java: " + versionBase + ", Native: " + versionNative + ")");
-            }
-        }
+		// Load the library
+		try {
+			loadLibrary(libFolderPath, libName);
+		} catch (FileNotFoundException e) {
+			System.err.println("Error! jSSC Java and Native library was not loaded.");
+		}
+        
     }
+    
+	/**
+	 * Load the Library
+	 * 
+	 * Needed so we can throw the UnsatisfiedLinkError
+	 * 
+	 * @throws FileNotFoundException
+	 */
+	private static void loadLibrary(String libFolderPath, String libName) throws FileNotFoundException {
+
+		// System.out.println(" libFolderPath:"+libFolderPath);
+
+		// Check to make sure the directory exists. Create it if it doesn't
+		// exist.
+		if (!isLibFolderExist(libFolderPath)) {
+			// Create the directory
+			new File(libFolderPath).mkdirs();
+			// Check to make sure it was created
+			if (!isLibFolderExist(libFolderPath)) {
+				throw new FileNotFoundException(libFolderPath);
+			}
+		}
+
+		// Check to see if the library is already extracted.
+		if (!isLibFileExist(libFolderPath + fileSeparator + libName)) {
+			// It hasn't been extracted.
+
+			// Check to seee if the directory is writeable
+			if (!isLibFolderWriteable(libFolderPath)) {
+				throw new FileNotFoundException("lib folder is not writeable");
+			}
+
+			// System.out.println("  extract.");
+
+			// Extract the library into the file
+			extractLib((libFolderPath + fileSeparator + libName), osName, libName);
+		}
+
+		// Make sure the library
+		if (isLibFileExist(libFolderPath + fileSeparator + libName)) {
+			System.load(libFolderPath + fileSeparator + libName);
+
+			// Check the version to make sure it matches
+			String versionBase = getLibraryBaseVersion();
+			String versionNative = getNativeLibraryVersion();
+			if (!versionBase.equals(versionNative)) {
+				System.err.println("Warning! jSSC Java and Native versions mismatch (Java: " + versionBase + ", Native: " + versionNative + ")");
+			}
+
+		} else {
+
+			// if we couldn't load the library, then we'd better darn well tell
+			// someone about it.
+			throw new UnsatisfiedLinkError("Native library was not loaded correctly.");
+		}
+
+	}    
+	
+	/**
+	 * Is library folder writable
+	 * 
+	 * @param libFolderPath
+	 * 
+	 * @since 2.8
+	 */
+	private static boolean isLibFolderWriteable(String libFolderPath) {
+		boolean returnValue = false;
+		File folder = new File(libFolderPath);
+		if (folder.exists() && folder.isDirectory() && folder.canWrite()) {
+			returnValue = true;
+		}
+		return returnValue;
+	}	
 
     /**
      * Is library folder exists
